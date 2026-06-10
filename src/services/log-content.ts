@@ -9,7 +9,7 @@ export interface LogContentDecision {
  * Decide whether masked content should be persisted to the request log.
  *
  * When secrets_detection.action is "mask" (the default), maskedContent has both
- * PII and secrets replaced by placeholders (e.g. "[API_KEY_SK_1]",
+ * PII and secrets replaced by placeholders (e.g. "[[API_KEY_SK_1]]",
  * "[[EMAIL_ADDRESS_1]]") by the time it reaches the logger, so it is safe to
  * store even when secrets were detected — gating follows log_masked_content.
  *

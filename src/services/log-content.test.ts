@@ -3,9 +3,9 @@ import { shouldLogMaskedContent } from "./log-content";
 
 describe("shouldLogMaskedContent", () => {
   // With action "mask", maskedContent has both PII and secrets replaced by
-  // placeholders, e.g. "My key is [API_KEY_SK_1] and email [[EMAIL_ADDRESS_1]]".
+  // placeholders, e.g. "My key is [[API_KEY_SK_1]] and email [[EMAIL_ADDRESS_1]]".
   // Storing it is safe even when secrets were detected (issue #91).
-  const maskedWithSecret = "My key is [API_KEY_SK_1] and email [[EMAIL_ADDRESS_1]]";
+  const maskedWithSecret = "My key is [[API_KEY_SK_1]] and email [[EMAIL_ADDRESS_1]]";
   const maskedPiiOnly = "Email [[EMAIL_ADDRESS_1]]";
 
   test("logs masked content when secrets were detected and masked", () => {

@@ -74,4 +74,4 @@ Only metadata (timestamps, models, PII detected) is logged.
 - Raw request/response content is **never** logged — only the masked version, and only when `log_masked_content` is enabled
 - With `secrets_detection.action: route_local`, content is not logged at all when secrets are detected, since secrets stay unmasked for the local provider
 - Only secret types are logged if `log_detected_types: true`
-- Masked content shows placeholders like `[[EMAIL_ADDRESS_1]]` and `[API_KEY_SK_1]`, not real values
+- Masked content shows placeholders like `[[EMAIL_ADDRESS_1]]` and `[[API_KEY_SK_1]]`, not real values
