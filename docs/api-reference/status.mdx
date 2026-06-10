@@ -86,6 +86,17 @@ curl http://localhost:3000/info
     "score_threshold": 0.7,
     "entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
   },
+  "secrets_detection": {
+    "enabled": true,
+    "action": "mask",
+    "entities": ["OPENSSH_PRIVATE_KEY", "PEM_PRIVATE_KEY"],
+    "max_scan_chars": 200000,
+    "log_detected_types": true
+  },
+  "logging": {
+    "retention_days": 30,
+    "log_masked_content": true
+  },
   "masking": {
     "show_markers": false
   }

@@ -542,7 +542,7 @@ function formatMaskedPreview(maskedContent, entities) {
   if (!entities || entities.length === 0) {
     return '<span class="text-text-muted">No PII detected in this request</span>';
   }
-  return '<span class="text-text-muted">Masked content not logged (log_masked_content: false)</span>';
+  return '<span class="text-text-muted">Masked content not logged</span>';
 }
 
 function renderEntityList(entities) {

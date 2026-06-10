@@ -7,7 +7,6 @@ description: Configure request logging
 logging:
   database: ./data/pasteguard.db
   retention_days: 30
-  log_content: false
   log_masked_content: true
 ```
 
@@ -17,7 +16,6 @@ logging:
 |--------|---------|-------------|
 | `database` | `./data/pasteguard.db` | SQLite database path |
 | `retention_days` | `30` | Days to keep logs. `0` = forever |
-| `log_content` | `false` | Log raw request/response (contains PII!) |
 | `log_masked_content` | `true` | Log masked version for dashboard |
 
 ## Database
@@ -49,33 +47,23 @@ logging:
 
 ## Content Logging
 
-### Raw Content (not recommended)
-
-Logs original request/response including PII:
-
-```yaml
-logging:
-  log_content: true  # Contains sensitive data!
-```
-
 ### Masked Content (default)
 
-Logs masked version for dashboard preview:
+Logs the masked version for dashboard preview:
 
 ```yaml
 logging:
   log_masked_content: true
 ```
 
-Shows what was actually sent upstream with PII replaced by placeholders.
+Shows what was actually sent upstream with PII and secrets replaced by placeholders.
 
 ### No Content
 
-Disable all content logging:
+Disable content logging:
 
 ```yaml
 logging:
-  log_content: false
   log_masked_content: false
 ```
 
@@ -83,6 +71,7 @@ Only metadata (timestamps, models, PII detected) is logged.
 
 ## Security
 
-- Secret content is **never** logged, even if `log_content: true`
+- Raw request/response content is **never** logged — only the masked version, and only when `log_masked_content` is enabled
+- With `secrets_detection.action: route_local`, content is not logged at all when secrets are detected, since secrets stay unmasked for the local provider
 - Only secret types are logged if `log_detected_types: true`
-- Masked content shows placeholders like `[[EMAIL_ADDRESS_1]]`, not real PII
+- Masked content shows placeholders like `[[EMAIL_ADDRESS_1]]` and `[API_KEY_SK_1]`, not real values
