@@ -239,6 +239,7 @@ export function createLogData(options: CreateLogDataOptions): RequestLogData {
     detectedLanguage: pii?.detectedLanguage,
     maskedContent,
     secretsDetected: secrets?.detected,
+    secretsMasked: secrets?.masked,
     secretsTypes: secrets?.types,
     statusCode,
     errorMessage,
