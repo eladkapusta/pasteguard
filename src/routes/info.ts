@@ -43,6 +43,17 @@ infoRoutes.get("/info", (c) => {
       score_threshold: config.pii_detection.score_threshold,
       entities: config.pii_detection.entities,
     },
+    secrets_detection: {
+      enabled: config.secrets_detection.enabled,
+      action: config.secrets_detection.action,
+      entities: config.secrets_detection.entities,
+      max_scan_chars: config.secrets_detection.max_scan_chars,
+      log_detected_types: config.secrets_detection.log_detected_types,
+    },
+    logging: {
+      retention_days: config.logging.retention_days,
+      log_masked_content: config.logging.log_masked_content,
+    },
   };
 
   if (config.mode === "route" && config.local) {

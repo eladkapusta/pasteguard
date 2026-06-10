@@ -156,8 +156,7 @@ secrets_detection:
   # The 200KB default covers typical use cases
   max_scan_chars: 200000
 
-  # Log detected secret types (never logs secret content)
-  # Even if logging.log_content is true, secret content is never logged
+  # Log detected secret types (never logs raw secret content)
   log_detected_types: true
 
   # Which message roles to scan for secrets (optional)
@@ -178,11 +177,8 @@ logging:
   # Log retention in days (0 = keep forever)
   retention_days: 30
 
-  # Log request/response content (may contain sensitive data!)
-  log_content: false
-
   # Log masked content for dashboard preview (default: true)
-  # Shows what was actually sent to provider with PII replaced by placeholders
+  # Shows what was actually sent to provider with PII and secrets replaced by placeholders
   # Disable if you don't want any content stored, even masked
   log_masked_content: true
 

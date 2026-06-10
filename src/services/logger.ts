@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { getConfig } from "../config";
+import { shouldLogMaskedContent } from "./log-content";
 
 export interface RequestLog {
   id?: number;
@@ -302,6 +303,7 @@ export interface RequestLogData {
   detectedLanguage?: string;
   maskedContent?: string;
   secretsDetected?: boolean;
+  secretsMasked?: boolean;
   secretsTypes?: string[];
   statusCode?: number;
   errorMessage?: string;
@@ -312,9 +314,12 @@ export function logRequest(data: RequestLogData, userAgent: string | null): void
     const config = getConfig();
     const logger = getLogger();
 
-    // Safety: Never log content if secrets were detected
-    // Even if log_content is true, secrets are never logged
-    const shouldLogContent = data.maskedContent && !data.secretsDetected;
+    const shouldLogContent = shouldLogMaskedContent({
+      maskedContent: data.maskedContent,
+      logMaskedContent: config.logging.log_masked_content,
+      secretsDetected: data.secretsDetected,
+      secretsMasked: data.secretsMasked,
+    });
 
     // Only log secret types if configured to do so
     const shouldLogSecretTypes =
