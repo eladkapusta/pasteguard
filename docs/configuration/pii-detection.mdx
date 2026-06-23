@@ -92,11 +92,29 @@ Exclude specific text patterns from PII masking. Useful for preventing false pos
 ```yaml
 masking:
   whitelist:
-    - "Acme Corp"
-    - "Product XYZ"
+    - pattern: "Acme Corp"
+    - pattern: "Product XYZ"
+    - pattern: 'TEST-\d+'
+      regex: true
 ```
 
-Patterns match bidirectionally - detected text containing a whitelist entry (or vice versa) is excluded.
+A literal entry is matched as a substring: a detected value is left unmasked if it contains the entry, or the entry contains it. Set `regex: true` for JavaScript regex syntax — a regex entry must match the **entire** detected value, so `\d{4}` won't unmask a longer number that merely contains four digits.
+
+## Denylist
+
+Force specific text or regex patterns to be masked, even when the detector does not report them or PII detection is disabled. Each entry needs a `type`, which is used for the placeholder name.
+
+```yaml
+masking:
+  denylist:
+    - pattern: "ProjectX"
+      type: PROJECT_NAME
+    - pattern: 'CUST-\d{6}'
+      type: CUSTOMER_ID
+      regex: true
+```
+
+Patterns are matched literally by default. Set `regex: true` for JavaScript regex syntax — use single quotes in YAML when the pattern contains backslashes. A regex pattern must not match the empty string (use `\d+`, not `\d*`); empty-matching patterns are rejected at startup because they would mask nothing.
 
 ## Scan Roles
 

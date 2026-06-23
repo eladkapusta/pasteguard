@@ -23,7 +23,11 @@ import {
 } from "../secrets/mask";
 import { logRequest } from "../services/logger";
 import { detectPII, maskPII, type PIIDetectResult } from "../services/pii";
-import { processSecretsRequest, type SecretsProcessResult } from "../services/secrets";
+import {
+  processSecretsRequest,
+  type SecretsProcessResult,
+  secretPlaceholders,
+} from "../services/secrets";
 import {
   createLogData,
   errorFormats,
@@ -81,25 +85,11 @@ codexRoutes.post(
     }
 
     let piiResult: PIIDetectResult;
-    if (!config.pii_detection.enabled) {
-      piiResult = {
-        detection: {
-          hasPII: false,
-          spanEntities: [],
-          allEntities: [],
-          scanTimeMs: 0,
-          language: config.pii_detection.fallback_language,
-          languageFallback: false,
-        },
-        hasPII: false,
-      };
-    } else {
-      try {
-        piiResult = await detectPII(request, codexExtractor);
-      } catch (error) {
-        console.error("PII detection error:", error);
-        return respondDetectionError(c, request, startTime);
-      }
+    try {
+      piiResult = await detectPII(request, codexExtractor, secretPlaceholders(secretsResult));
+    } catch (error) {
+      console.error("PII detection error:", error);
+      return respondDetectionError(c, request, startTime);
     }
 
     const shouldBlockRouteMode =

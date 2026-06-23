@@ -1,6 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
-import { filterWhitelistedEntities, type PIIEntity } from "../pii/detect";
+import {
+  filterWhitelistedEntities,
+  findDenylistedEntities,
+  mergeDenylistEntities,
+  type PIIEntity,
+} from "../pii/detect";
 
 // Mock the PII detector to avoid needing the detector running
 const mockDetectPII = mock<(text: string, language: string) => Promise<PIIEntity[]>>(() =>
@@ -12,6 +17,8 @@ mock.module("../pii/detect", () => ({
     healthCheck: mock(() => Promise.resolve(true)),
   }),
   filterWhitelistedEntities,
+  findDenylistedEntities,
+  mergeDenylistEntities,
 }));
 
 // Mock the logger to avoid database operations
@@ -24,6 +31,8 @@ const realConfig = await import("../config");
 const baseConfig = realConfig.getConfig();
 const testConfig = {
   ...baseConfig,
+  // Pin detection on so the detector mock is consumed regardless of config.yaml.
+  pii_detection: { ...baseConfig.pii_detection, enabled: true },
   secrets_detection: {
     ...baseConfig.secrets_detection,
     enabled: true,
@@ -131,6 +140,69 @@ describe("POST /api/mask", () => {
     expect(body.counters.EMAIL_ADDRESS).toBe(1);
     expect(body.entities).toHaveLength(1);
     expect(body.entities[0].type).toBe("EMAIL_ADDRESS");
+  });
+
+  test("masks configured denylist patterns", async () => {
+    const previousDenylist = testConfig.masking.denylist;
+    testConfig.masking.denylist = [
+      { pattern: "ProjectX", type: "PROJECT_NAME", regex: false },
+      { pattern: "CUST-\\d{6}", type: "CUSTOMER_ID", regex: true },
+    ];
+    mockDetectPII.mockResolvedValueOnce([]);
+
+    try {
+      const res = await app.request("/api/mask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "ProjectX customer CUST-123456" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        masked: string;
+        context: Record<string, string>;
+        entities: { type: string; placeholder: string }[];
+      };
+      expect(body.masked).toBe("[[PROJECT_NAME_1]] customer [[CUSTOMER_ID_1]]");
+      expect(body.context["[[PROJECT_NAME_1]]"]).toBe("ProjectX");
+      expect(body.context["[[CUSTOMER_ID_1]]"]).toBe("CUST-123456");
+      expect(body.entities).toEqual([
+        { type: "PROJECT_NAME", placeholder: "[[PROJECT_NAME_1]]" },
+        { type: "CUSTOMER_ID", placeholder: "[[CUSTOMER_ID_1]]" },
+      ]);
+    } finally {
+      testConfig.masking.denylist = previousDenylist;
+    }
+  });
+
+  test("denylist match inside a detected entity does not leak the rest of it", async () => {
+    const previousDenylist = testConfig.masking.denylist;
+    testConfig.masking.denylist = [{ pattern: "ProjectX", type: "PROJECT_NAME", regex: false }];
+    mockDetectPII.mockResolvedValueOnce([
+      { entity_type: "EMAIL_ADDRESS", start: 6, end: 23, score: 0.95 },
+    ]);
+
+    try {
+      const res = await app.request("/api/mask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Email ProjectX@corp.com" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        masked: string;
+        context: Record<string, string>;
+        entities: { type: string; placeholder: string }[];
+      };
+      expect(body.masked).toBe("Email [[EMAIL_ADDRESS_1]]");
+      expect(body.context["[[EMAIL_ADDRESS_1]]"]).toBe("ProjectX@corp.com");
+      expect(body.entities).toEqual([
+        { type: "EMAIL_ADDRESS", placeholder: "[[EMAIL_ADDRESS_1]]" },
+      ]);
+    } finally {
+      testConfig.masking.denylist = previousDenylist;
+    }
   });
 
   test("respects startFrom counters", async () => {
@@ -280,6 +352,36 @@ describe("POST /api/mask", () => {
     expect(body.entities.some((e) => e.type === "CONNECTION_STRING")).toBe(true);
     expect(body.masked).not.toContain("[[EMAIL_ADDRESS");
     expect(body.entities.some((e) => e.type === "EMAIL_ADDRESS")).toBe(false);
+  });
+
+  test("denylist does not corrupt an existing secret placeholder", async () => {
+    const previousDenylist = testConfig.masking.denylist;
+    testConfig.masking.denylist = [{ pattern: "\\d+", type: "NUM", regex: true }];
+    mockDetectPII.mockResolvedValueOnce([]);
+
+    try {
+      const res = await app.request("/api/mask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Connection: postgres://admin:S3cretPass@db.example.com:5432/appdb",
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        masked: string;
+        context: Record<string, string>;
+        entities: { type: string }[];
+      };
+      expect(body.masked).toContain("[[CONNECTION_STRING_1]]");
+      expect(body.masked).not.toContain("[[NUM");
+      expect(body.masked).not.toContain("STRING_[[");
+      expect(body.entities.some((e) => e.type === "NUM")).toBe(false);
+      expect(body.context["[[CONNECTION_STRING_1]]"]).toContain("postgres://");
+    } finally {
+      testConfig.masking.denylist = previousDenylist;
+    }
   });
 
   test("returns 400 for malformed JSON", async () => {

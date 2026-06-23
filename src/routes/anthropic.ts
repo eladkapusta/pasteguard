@@ -31,7 +31,11 @@ import { callLocalAnthropic } from "../providers/local";
 import { unmaskSecretsResponse } from "../secrets/mask";
 import { logRequest } from "../services/logger";
 import { detectPII, maskPII, type PIIDetectResult } from "../services/pii";
-import { processSecretsRequest, type SecretsProcessResult } from "../services/secrets";
+import {
+  processSecretsRequest,
+  type SecretsProcessResult,
+  secretPlaceholders,
+} from "../services/secrets";
 import {
   createLogData,
   errorFormats,
@@ -110,27 +114,13 @@ anthropicRoutes.post(
       request = secretsResult.request;
     }
 
-    // Step 2: Detect PII (skip if disabled)
+    // Step 2: Detect PII and configured denylist terms
     let piiResult: PIIDetectResult;
-    if (!config.pii_detection.enabled) {
-      piiResult = {
-        detection: {
-          hasPII: false,
-          spanEntities: [],
-          allEntities: [],
-          scanTimeMs: 0,
-          language: "en",
-          languageFallback: false,
-        },
-        hasPII: false,
-      };
-    } else {
-      try {
-        piiResult = await detectPII(request, anthropicExtractor);
-      } catch (error) {
-        console.error("PII detection error:", error);
-        return respondDetectionError(c, request, secretsResult, startTime);
-      }
+    try {
+      piiResult = await detectPII(request, anthropicExtractor, secretPlaceholders(secretsResult));
+    } catch (error) {
+      console.error("PII detection error:", error);
+      return respondDetectionError(c, request, secretsResult, startTime);
     }
 
     // Step 3: Route mode - send to local if PII or secrets detected

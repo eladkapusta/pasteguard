@@ -1,5 +1,6 @@
-import { getConfig } from "../config";
+import { type DenylistPattern, getConfig, type WhitelistPattern } from "../config";
 import { HEALTH_CHECK_TIMEOUT_MS } from "../constants/timeouts";
+import { overlaps, resolveConflicts } from "../masking/conflict-resolver";
 import type { RequestExtractor } from "../masking/types";
 import { getLanguageDetector, type SupportedLanguage } from "../services/language-detector";
 
@@ -10,18 +11,121 @@ export interface PIIEntity {
   score: number;
 }
 
+// Denylist matches are exact (operator-configured), so they carry full confidence.
+const DENYLIST_MATCH_SCORE = 1;
+
+function findLiteralMatches(text: string, pattern: string, type: string): PIIEntity[] {
+  const matches: PIIEntity[] = [];
+  let index = text.indexOf(pattern);
+
+  while (index !== -1) {
+    matches.push({
+      entity_type: type,
+      start: index,
+      end: index + pattern.length,
+      score: DENYLIST_MATCH_SCORE,
+    });
+    index = text.indexOf(pattern, index + pattern.length);
+  }
+
+  return matches;
+}
+
+function findRegexMatches(text: string, pattern: string, type: string): PIIEntity[] {
+  const regex = new RegExp(pattern, "g");
+  const matches: PIIEntity[] = [];
+
+  for (const match of text.matchAll(regex)) {
+    if (match.index === undefined || match[0].length === 0) continue;
+    matches.push({
+      entity_type: type,
+      start: match.index,
+      end: match.index + match[0].length,
+      score: DENYLIST_MATCH_SCORE,
+    });
+  }
+
+  return matches;
+}
+
+function placeholderSpans(
+  text: string,
+  placeholders: readonly string[],
+): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const placeholder of placeholders) {
+    let index = text.indexOf(placeholder);
+    while (index !== -1) {
+      spans.push({ start: index, end: index + placeholder.length });
+      index = text.indexOf(placeholder, index + placeholder.length);
+    }
+  }
+  return spans;
+}
+
+export function findDenylistedEntities(
+  text: string,
+  denylist: DenylistPattern[],
+  knownPlaceholders: readonly string[] = [],
+): PIIEntity[] {
+  if (denylist.length === 0 || !text) return [];
+
+  const matches = denylist.flatMap(({ pattern, type, regex }) =>
+    regex ? findRegexMatches(text, pattern, type) : findLiteralMatches(text, pattern, type),
+  );
+  if (matches.length === 0 || knownPlaceholders.length === 0) return matches;
+
+  // Drop matches inside an already-masked placeholder; re-masking its internals would corrupt the earlier mask.
+  const masked = placeholderSpans(text, knownPlaceholders);
+  if (masked.length === 0) return matches;
+  return matches.filter((m) => !masked.some((p) => overlaps(m, p)));
+}
+
+// Additive merge: a denylist match extends coverage but never shrinks an overlapping detector span; overlaps become their union and the detector type wins.
+export function mergeDenylistEntities(detected: PIIEntity[], denylisted: PIIEntity[]): PIIEntity[] {
+  if (denylisted.length === 0) return detected;
+
+  const resolvedDetector = resolveConflicts(detected);
+  const tagged = [
+    ...resolvedDetector.map((e) => ({ e, forced: false })),
+    ...denylisted.map((e) => ({ e, forced: true })),
+  ].sort((a, b) => a.e.start - b.e.start);
+
+  const result: { e: PIIEntity; forced: boolean }[] = [];
+  for (const item of tagged) {
+    const last = result[result.length - 1];
+    if (last && overlaps(item.e, last.e)) {
+      last.e = {
+        entity_type: last.forced && !item.forced ? item.e.entity_type : last.e.entity_type,
+        start: last.e.start,
+        end: Math.max(last.e.end, item.e.end),
+        score: Math.max(last.e.score, item.e.score),
+      };
+      last.forced = last.forced && item.forced;
+    } else {
+      result.push({ e: { ...item.e }, forced: item.forced });
+    }
+  }
+
+  return result.map((r) => r.e);
+}
+
 export function filterWhitelistedEntities(
   text: string,
   entities: PIIEntity[],
-  whitelist: string[],
+  whitelist: WhitelistPattern[],
 ): PIIEntity[] {
   if (whitelist.length === 0) return entities;
 
   return entities.filter((entity) => {
     const detectedText = text.slice(entity.start, entity.end);
-    return !whitelist.some(
-      (pattern) => pattern.includes(detectedText) || detectedText.includes(pattern),
-    );
+    return !whitelist.some(({ pattern, regex }) => {
+      if (regex) {
+        // Anchor to the whole entity so a partial match can't un-mask a larger detected span.
+        return new RegExp(`^(?:${pattern})$`).test(detectedText);
+      }
+      return pattern.includes(detectedText) || detectedText.includes(pattern);
+    });
   });
 }
 
@@ -101,9 +205,22 @@ export class PIIDetector {
   async analyzeRequest<TRequest, TResponse>(
     request: TRequest,
     extractor: RequestExtractor<TRequest, TResponse>,
+    knownPlaceholders: readonly string[] = [],
   ): Promise<PIIDetectionResult> {
     const startTime = Date.now();
     const config = getConfig();
+
+    // Pure pass-through: detection off and no denylist, so skip extraction and language detection.
+    if (!config.pii_detection.enabled && config.masking.denylist.length === 0) {
+      return {
+        hasPII: false,
+        spanEntities: [],
+        allEntities: [],
+        scanTimeMs: 0,
+        language: config.pii_detection.fallback_language,
+        languageFallback: true,
+      };
+    }
 
     // Extract all text spans from request
     const spans = extractor.extractTexts(request);
@@ -120,15 +237,22 @@ export class PIIDetector {
       ? new Set(config.pii_detection.scan_roles)
       : null;
     const whitelist = config.masking.whitelist;
+    const denylist = config.masking.denylist;
 
     const spanEntities: PIIEntity[][] = await Promise.all(
       spans.map(async (span) => {
-        if (scanRoles && span.role && !scanRoles.has(span.role)) {
-          return [];
-        }
         if (!span.text) return [];
-        const entities = await this.detectPII(span.text, langResult.language);
-        return filterWhitelistedEntities(span.text, entities, whitelist);
+        const denylistedEntities = findDenylistedEntities(span.text, denylist, knownPlaceholders);
+
+        if (scanRoles && span.role && !scanRoles.has(span.role)) {
+          return mergeDenylistEntities([], denylistedEntities);
+        }
+
+        const detectedEntities = config.pii_detection.enabled
+          ? await this.detectPII(span.text, langResult.language)
+          : [];
+        const filteredEntities = filterWhitelistedEntities(span.text, detectedEntities, whitelist);
+        return mergeDenylistEntities(filteredEntities, denylistedEntities);
       }),
     );
 

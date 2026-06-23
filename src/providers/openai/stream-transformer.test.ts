@@ -7,6 +7,7 @@ const defaultConfig: MaskingConfig = {
   show_markers: false,
   marker_text: "[protected]",
   whitelist: [],
+  denylist: [],
 };
 
 /**
@@ -99,6 +100,40 @@ describe("createUnmaskingStream", () => {
 
     // Should eventually contain the unmasked email
     expect(result).toContain("a@b.com");
+  });
+
+  test("buffers a placeholder split between the two opening brackets", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "a@b.com";
+
+    const chunks = [
+      `data: {"choices":[{"delta":{"content":"Hello ["}}]}\n\n`,
+      `data: {"choices":[{"delta":{"content":"[EMAIL_ADDRESS_1]] world"}}]}\n\n`,
+    ];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("a@b.com");
+    expect(result).not.toContain("[[EMAIL_ADDRESS_1]]");
+  });
+
+  test("buffers a placeholder split between the two closing brackets", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "a@b.com";
+
+    const chunks = [
+      `data: {"choices":[{"delta":{"content":"Hello [[EMAIL_ADDRESS_1]"}}]}\n\n`,
+      `data: {"choices":[{"delta":{"content":"] world"}}]}\n\n`,
+    ];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("a@b.com");
+    expect(result).not.toContain("[[EMAIL_ADDRESS_1]");
   });
 
   test("flushes remaining buffer on stream end", async () => {
