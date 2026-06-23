@@ -34,6 +34,7 @@ import {
   handleProviderError,
   setBlockedHeaders,
   setResponseHeaders,
+  setStreamingHeaders,
   toPIIHeaderData,
   toPIILogData,
   toSecretsHeaderData,
@@ -51,13 +52,6 @@ const CodexResponsesRequestSchema = z
   })
   .passthrough();
 
-/**
- * POST /responses
- *
- * Inspected Codex Responses route. This mirrors the OpenAI/Anthropic protected
- * endpoints: detect secrets/PII, mask before upstream, unmask streamed response,
- * and log the request in the dashboard.
- */
 codexRoutes.post(
   "/responses",
   zValidator("json", CodexResponsesRequestSchema, (result, c) => {
@@ -115,10 +109,6 @@ codexRoutes.post(
   },
 );
 
-/**
- * Wildcard pass-through proxy for /models and any future Codex endpoints that do
- * not carry prompt content.
- */
 codexRoutes.all("/*", (c) => {
   const config = getConfig();
   const normalizedBaseUrl = config.providers.codex.base_url.replace(/\/$/, "");
@@ -370,9 +360,7 @@ function respondStreaming(
   secretsContext?: PlaceholderContext,
   maskingConfig = getConfig().masking,
 ) {
-  c.header("Content-Type", "text/event-stream");
-  c.header("Cache-Control", "no-cache");
-  c.header("Connection", "keep-alive");
+  setStreamingHeaders(c);
 
   if (piiContext || secretsContext) {
     return c.body(createCodexUnmaskingStream(stream, piiContext, maskingConfig, secretsContext));

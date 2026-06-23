@@ -1,14 +1,3 @@
-/**
- * Anthropic-compatible messages route
- *
- * Flow:
- * 1. Validate request
- * 2. Process secrets (detect, maybe block, mask, or route_local)
- * 3. Detect PII
- * 4. Route mode: if PII found, send to local provider
- * 5. Mask mode: mask PII if found, send to Anthropic, unmask response
- */
-
 import { zValidator } from "@hono/zod-validator";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -42,6 +31,7 @@ import {
   handleProviderError,
   setBlockedHeaders,
   setResponseHeaders,
+  setStreamingHeaders,
   toPIIHeaderData,
   toPIILogData,
   toSecretsHeaderData,
@@ -50,9 +40,6 @@ import {
 
 export const anthropicRoutes = new Hono();
 
-/**
- * POST /v1/messages - Anthropic-compatible messages endpoint
- */
 anthropicRoutes.post(
   "/v1/messages",
   zValidator("json", AnthropicRequestSchema, (result, c) => {
@@ -162,11 +149,6 @@ anthropicRoutes.post(
   },
 );
 
-/**
- * Proxy all other requests to Anthropic
- *
- * Transparent header forwarding - all auth headers from client are passed through.
- */
 anthropicRoutes.all("/*", async (c) => {
   const config = getConfig();
 
@@ -327,9 +309,7 @@ async function sendToLocal(c: Context, originalRequest: AnthropicRequest, opts: 
     );
 
     if (result.isStreaming) {
-      c.header("Content-Type", "text/event-stream");
-      c.header("Cache-Control", "no-cache");
-      c.header("Connection", "keep-alive");
+      setStreamingHeaders(c);
       return c.body(result.response as ReadableStream);
     }
 
@@ -417,9 +397,7 @@ function respondStreaming(
   secretsContext: PlaceholderContext | undefined,
 ) {
   const config = getConfig();
-  c.header("Content-Type", "text/event-stream");
-  c.header("Cache-Control", "no-cache");
-  c.header("Connection", "keep-alive");
+  setStreamingHeaders(c);
 
   if (piiMaskingContext || secretsContext) {
     const unmaskingStream = createAnthropicUnmaskingStream(
