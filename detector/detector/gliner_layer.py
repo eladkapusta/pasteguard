@@ -110,9 +110,7 @@ def load_model() -> None:
 
 @lru_cache(maxsize=MODEL_INFERENCE_CACHE_SIZE)
 def _predict_window(text: str):
-    return _model.predict_entities(
-        text, _PREDICT_LABELS, threshold=max(0.0, _PREDICT_FLOOR)
-    )
+    return _model.predict_entities(text, _PREDICT_LABELS, threshold=max(0.0, _PREDICT_FLOOR))
 
 
 def detect_gliner(text: str, score_threshold: float = 0.0) -> list[Span]:
